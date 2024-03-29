@@ -16,6 +16,7 @@ pub struct QueryBuilder {
     batch: usize,
     limit: usize,
     exclude_common_errors: bool,
+    appended_query: String,
 }
 
 impl Default for QueryBuilder {
@@ -36,6 +37,7 @@ impl QueryBuilder {
             batch: 5000,
             limit: 100000,
             exclude_common_errors: true,
+            appended_query: String::new(),
         }
     }
 
@@ -103,6 +105,12 @@ impl QueryBuilder {
         self
     }
 
+    /// Append a query to the existing query.
+    pub fn append_query(mut self, query: String) -> Self {
+        self.appended_query = query;
+        self
+    }
+
     /// Build the query.
     pub fn build(&self) -> String {
         let exclude_common_errors = self
@@ -157,6 +165,86 @@ impl QueryBuilder {
             self.batch,
             self.limit,
         )
+    }
+
+    /// Build the query.
+    pub fn build_chunks(&self) -> Vec<String> {
+        let exclude_common_errors = self
+            .exclude_common_errors
+            .then_some(EXCLUDE_KNOWN_ERRORS)
+            .unwrap_or_default();
+
+        let (mut start_time, end_time) = match (&self.start_time, &self.end_time) {
+            (None, None) => {
+                // Compute endtime as now.
+                let date_time = chrono::Utc::now();
+                let end_time = format!("{}", date_time.format("%Y-%m-%dT%H:%M:%SZ"));
+                // Subtract 1 hour from date time
+                let date_time = date_time - chrono::Duration::hours(1);
+                let start_time = format!("{}", date_time.format("%Y-%m-%dT%H:%M:%SZ"));
+
+                log::debug!("Generating time {} {}", start_time, end_time);
+                (start_time, end_time)
+            }
+            (Some(start_time), Some(end_time)) => {
+                log::debug!("Using provided time {start_time} {end_time}");
+                (start_time.clone(), end_time.clone())
+            }
+            _ => {
+                panic!("Either both start and end time should be provided or none")
+            }
+        };
+
+        let levels = (!self.levels.is_empty())
+            .then_some(format!(", level=~\"{}\"", self.levels.join("|")))
+            .unwrap_or_default();
+
+        let addr = self
+            .address
+            .as_ref()
+            .cloned()
+            .unwrap_or(DEFAULT_URL.to_string());
+        let chain = self
+            .chain
+            .as_ref()
+            .cloned()
+            .unwrap_or(DEFAULT_CHAIN.to_string());
+
+        let advance_time = |current: &str| {
+            log::info!("Current time: {}", current);
+            let current =
+                chrono::NaiveDateTime::parse_from_str(&current, "%Y-%m-%dT%H:%M:%SZ").unwrap();
+            let current = current + chrono::Duration::hours(1);
+            (format!("{}", current.format("%Y-%m-%dT%H:%M:%SZ")), current)
+        };
+
+        let value_end_time =
+            chrono::NaiveDateTime::parse_from_str(&end_time, "%Y-%m-%dT%H:%M:%SZ").unwrap();
+        let (mut end_time_str, mut end_time_date) = advance_time(&start_time);
+
+        let mut queries = Vec::new();
+
+        while end_time_date < value_end_time {
+            queries.push(
+                format!(
+                    r#"docker run grafana/logcli:main-926a0b2-amd64 query --addr={} --timezone=UTC --from="{}" --to="{}" '{{chain="{}" {}}} {} {}' --batch {} --limit {}"#,
+                    addr,
+                    start_time,
+                    end_time_str,
+                    chain,
+                    levels,
+                    exclude_common_errors,
+                    self.appended_query,
+                    self.batch,
+                    self.limit,
+                )
+            );
+
+            start_time = end_time_str.clone();
+            (end_time_str, end_time_date) = advance_time(&end_time_str);
+        }
+
+        queries
     }
 }
 

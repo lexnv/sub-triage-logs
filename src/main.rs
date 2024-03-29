@@ -62,29 +62,27 @@ impl Stats {
             now: std::time::Instant::now(),
         }
     }
+}
 
-    fn validate(&self) {
+impl Drop for Stats {
+    fn drop(&mut self) {
         log::info!(
-            "Running statistics: Execution took {}s {:?}",
+            "Statistics: Execution took {}s {:?}",
             self.now.elapsed().as_secs(),
             self
         );
-
-        assert_eq!(
-            self.total,
-            self.empty_lines + self.warning_err + self.unknown
-        )
     }
 }
 
 /// Command for interacting with the CLI.
 #[derive(Debug, ClapParser)]
 enum Command {
-    WarnErr(WarnErr),
+    WarnErr(Config),
+    Panics(Config),
 }
 
 #[derive(Debug, ClapParser)]
-struct WarnErr {
+struct Config {
     /// The address of the Loki instance.
     #[clap(long, default_value = "http://loki.parity-versi.parity.io")]
     address: String,
@@ -104,7 +102,7 @@ struct WarnErr {
     end_time: Option<String>,
 }
 
-fn run_warn_err(opts: WarnErr) -> Result<(), Box<dyn std::error::Error>> {
+fn run_warn_err(opts: Config) -> Result<(), Box<dyn std::error::Error>> {
     log::info!("Running WarnErr query");
     let mut stats = Stats::new();
 
@@ -170,7 +168,61 @@ fn run_warn_err(opts: WarnErr) -> Result<(), Box<dyn std::error::Error>> {
         unknown_lines
     );
 
-    stats.validate();
+    Ok(())
+}
+
+fn run_panics(opts: Config) -> Result<(), Box<dyn std::error::Error>> {
+    log::info!("Running panic query");
+    let mut stats = Stats::new();
+
+    // Build the query.
+    let queries = query::QueryBuilder::new()
+        .address(opts.address)
+        .chain(opts.chain)
+        .set_time(opts.start_time, opts.end_time)
+        // Panics can appear anywhere.
+        .exclude_common_errors(false)
+        .append_query("|~ `panic`".to_string())
+        .build_chunks();
+
+    for query in queries {
+        // Run the query.
+        let mut result = query::QueryRunner::run(&query);
+        let mut retries = 0;
+        while let Err(err) = &result {
+            log::error!("Error: {}", err);
+            std::thread::sleep(std::time::Duration::from_secs(5));
+
+            retries += 1;
+
+            if retries == 3 {
+                log::error!("Failed to run query after 3 retries");
+                break;
+            }
+            result = query::QueryRunner::run(&query);
+        }
+
+        let result = result?;
+        let result = String::from_utf8_lossy(&result);
+
+        for line in result.lines() {
+            log::debug!("{}", line);
+
+            if line.is_empty() {
+                stats.empty_lines += 1;
+                continue;
+            }
+
+            if line.contains("panic") {
+                log::info!("{}", line);
+                stats.warning_err += 1;
+            }
+
+            stats.total += 1;
+        }
+
+        log::info!("Finished partial query");
+    }
 
     Ok(())
 }
@@ -179,7 +231,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
 
     let args = Command::parse();
-    // One command for now.
-    let Command::WarnErr(warn_err) = args;
-    run_warn_err(warn_err)
+
+    match args {
+        Command::WarnErr(opts) => run_warn_err(opts),
+        Command::Panics(opts) => run_panics(opts),
+    }
 }
