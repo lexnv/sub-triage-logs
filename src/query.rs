@@ -1,3 +1,5 @@
+//! Query builder and running for fetching the grafana logs.
+
 /// Default URL of the Loki instance.
 const DEFAULT_URL: &str = "http://loki.parity-versi.parity.io";
 /// Default chain to query.
@@ -134,5 +136,28 @@ impl QueryBuilder {
             r#"docker run grafana/logcli:main-926a0b2-amd64 query --addr={} --timezone=UTC --from="{}" --to="{}" '{{chain="{}", level=~"ERROR|WARN"}} {}' --batch {} --limit {}"#,
             addr, start_time, end_time, chain, exclude_common_errors, self.batch, self.limit,
         )
+    }
+}
+
+pub struct QueryRunner;
+
+impl QueryRunner {
+    pub fn run(query: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+        log::info!("Running query: {}", query);
+
+        let now = std::time::Instant::now();
+        let result = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(query)
+            .output()?;
+        log::info!("Query completed in {:?}", now.elapsed());
+
+        if !result.status.success() {
+            log::error!("Query failed: {}", String::from_utf8_lossy(&result.stderr));
+            return Err("Query failed".into());
+        }
+
+        log::info!("Query completed successfully");
+        Ok(result.stdout)
     }
 }

@@ -17,7 +17,6 @@ const GROUPED: [&str; 26] = [
     "Reason: BEEFY: Future message. Banned, disconnecting",
     "Reason: A collator was reported by another subsystem. Banned, disconnecting",
 
-
     "Trying to remove unknown reserved node",
 
     "babe: 👶 Epoch(s) skipped:",
@@ -28,8 +27,9 @@ const GROUPED: [&str; 26] = [
     "parachain::availability-distribution: fetch_pov_job err=FetchPoV(NetworkError(NotConnected))",
     "parachain::availability-distribution: fetch_pov_job err=FetchPoV(NetworkError(Network(DialFailure)))",
     "parachain::dispute-coordinator: Attempted import of on-chain backing votes failed",
-    "parachain::statement-distribution: Cluster has too many pending statements, something wrong with our connection to our group peers",
 
+    // Note: These are the same, however substrate added an extra `\n`.
+    "parachain::statement-distribution: Cluster has too many pending statements, something wrong with our connection to our group peers",
     "Restart might be needed if validator gets 0 backing rewards for more than 3-4 consecutive sessions",
 
 
@@ -43,16 +43,33 @@ const GROUPED: [&str; 26] = [
     "grandpa: Re-finalized block",
 ];
 
-#[derive(Default)]
+#[derive(Debug)]
 struct Stats {
     total: usize,
     empty_lines: usize,
     warning_err: usize,
     unknown: usize,
+    now: std::time::Instant,
 }
 
 impl Stats {
+    fn new() -> Self {
+        Stats {
+            total: 0,
+            empty_lines: 0,
+            warning_err: 0,
+            unknown: 0,
+            now: std::time::Instant::now(),
+        }
+    }
+
     fn validate(&self) {
+        log::info!(
+            "Running statistics: Execution took {}s {:?}",
+            self.now.elapsed().as_secs(),
+            self
+        );
+
         assert_eq!(
             self.total,
             self.empty_lines + self.warning_err + self.unknown
@@ -89,6 +106,7 @@ struct WarnErr {
 
 fn run_warn_err(opts: WarnErr) -> Result<(), Box<dyn std::error::Error>> {
     log::info!("Running WarnErr query");
+    let mut stats = Stats::new();
 
     // Build the query.
     let query = query::QueryBuilder::new()
@@ -98,25 +116,13 @@ fn run_warn_err(opts: WarnErr) -> Result<(), Box<dyn std::error::Error>> {
         .build();
 
     // Run the query.
-    log::info!("Running query: {}", query);
-    let now = std::time::Instant::now();
-    let result = std::process::Command::new("sh")
-        .arg("-c")
-        .arg(query)
-        .output()?;
-    log::info!("Query took took: {:?}", now.elapsed());
-
-    if !result.status.success() {
-        log::error!("Query failed with status {:?}", result.status);
-        return Err(format!("Query failed with status {:?}", result.status).into());
-    }
-    let output = String::from_utf8_lossy(&result.stdout);
+    let result = query::QueryRunner::run(&query)?;
+    let result = String::from_utf8_lossy(&result);
 
     let mut grouped_err: Vec<_> = GROUPED.iter().map(|&x| (x, 0)).collect();
     let mut unknown_lines = Vec::with_capacity(1024);
-    let mut stats = Stats::default();
 
-    for line in output.lines() {
+    for line in result.lines() {
         log::debug!("{}", line);
 
         stats.total += 1;
