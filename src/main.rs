@@ -112,6 +112,7 @@ fn run_warn_err(opts: WarnErr) -> Result<(), Box<dyn std::error::Error>> {
     let query = query::QueryBuilder::new()
         .address(opts.address)
         .chain(opts.chain)
+        .levels(vec!["WARN".to_string(), "ERROR".to_string()])
         .set_time(opts.start_time, opts.end_time)
         .build();
 

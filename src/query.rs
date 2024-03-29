@@ -12,6 +12,7 @@ pub struct QueryBuilder {
     chain: Option<String>,
     start_time: Option<String>,
     end_time: Option<String>,
+    levels: Vec<String>,
     batch: usize,
     limit: usize,
     exclude_common_errors: bool,
@@ -31,6 +32,7 @@ impl QueryBuilder {
             chain: None,
             start_time: None,
             end_time: None,
+            levels: Vec::new(),
             batch: 5000,
             limit: 100000,
             exclude_common_errors: true,
@@ -93,6 +95,14 @@ impl QueryBuilder {
         self
     }
 
+    /// Set the levels of the query.
+    ///
+    /// Default: empty.
+    pub fn levels(mut self, levels: Vec<String>) -> Self {
+        self.levels = levels;
+        self
+    }
+
     /// Build the query.
     pub fn build(&self) -> String {
         let exclude_common_errors = self
@@ -121,6 +131,10 @@ impl QueryBuilder {
             }
         };
 
+        let levels = (!self.levels.is_empty())
+            .then_some(format!(", level=~\"{}\"", self.levels.join("|")))
+            .unwrap_or_default();
+
         let addr = self
             .address
             .as_ref()
@@ -133,8 +147,15 @@ impl QueryBuilder {
             .unwrap_or(DEFAULT_CHAIN.to_string());
 
         format!(
-            r#"docker run grafana/logcli:main-926a0b2-amd64 query --addr={} --timezone=UTC --from="{}" --to="{}" '{{chain="{}", level=~"ERROR|WARN"}} {}' --batch {} --limit {}"#,
-            addr, start_time, end_time, chain, exclude_common_errors, self.batch, self.limit,
+            r#"docker run grafana/logcli:main-926a0b2-amd64 query --addr={} --timezone=UTC --from="{}" --to="{}" '{{chain="{}" {}}} {}' --batch {} --limit {}"#,
+            addr,
+            start_time,
+            end_time,
+            chain,
+            levels,
+            exclude_common_errors,
+            self.batch,
+            self.limit,
         )
     }
 }
