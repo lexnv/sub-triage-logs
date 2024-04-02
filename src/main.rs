@@ -2,7 +2,7 @@ use clap::Parser as ClapParser;
 
 pub mod query;
 
-const GROUPED: [&str; 26] = [
+const GROUPED: [&str; 27] = [
     // peerset:
     "Reason: BEEFY: Round vote message. Banned, disconnecting",
     "Reason: BEEFY: Not interested in round. Banned, disconnecting",
@@ -25,6 +25,7 @@ const GROUPED: [&str; 26] = [
 
     "parachain::availability-store: Candidate included without being backed?",
     "parachain::availability-distribution: fetch_pov_job err=FetchPoV(NetworkError(NotConnected))",
+    "parachain::availability-distribution: fetch_pov_job err=FetchPoV(NetworkError(Refused))",
     "parachain::availability-distribution: fetch_pov_job err=FetchPoV(NetworkError(Network(DialFailure)))",
     "parachain::dispute-coordinator: Attempted import of on-chain backing votes failed",
 
