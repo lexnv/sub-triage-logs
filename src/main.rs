@@ -151,14 +151,16 @@ fn run_warn_err(opts: Config) -> Result<(), Box<dyn std::error::Error>> {
     println!();
     println!(
         "{0: <135} | {1:<10}",
-        "WarningError -------------------", "Count"
+        "Triage logs -------------------", "Count"
     );
 
     grouped_err.sort_by_key(|(_key, value)| std::cmp::Reverse(*value));
-
     for (key, value) in grouped_err.iter() {
-        println!("{0: <135} | {1:<10}", key, value);
+        if value == &0 {
+            continue;
+        }
 
+        println!("{0: <135} | {1:<10}", key, value);
         stats.warning_err += value;
     }
 
@@ -211,11 +213,6 @@ fn run_panics(opts: Config) -> Result<(), Box<dyn std::error::Error>> {
             if line.is_empty() {
                 stats.empty_lines += 1;
                 continue;
-            }
-
-            if line.contains("panic") {
-                log::info!("{}", line);
-                stats.warning_err += 1;
             }
 
             stats.total += 1;

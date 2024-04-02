@@ -174,7 +174,7 @@ impl QueryBuilder {
             .then_some(EXCLUDE_KNOWN_ERRORS)
             .unwrap_or_default();
 
-        let (mut start_time, end_time) = match (&self.start_time, &self.end_time) {
+        let (start_time, end_time) = match (&self.start_time, &self.end_time) {
             (None, None) => {
                 // Compute endtime as now.
                 let date_time = chrono::Utc::now();
@@ -213,7 +213,7 @@ impl QueryBuilder {
         let advance_time = |current: &str| {
             log::info!("Current time: {}", current);
             let current =
-                chrono::NaiveDateTime::parse_from_str(&current, "%Y-%m-%dT%H:%M:%SZ").unwrap();
+                chrono::NaiveDateTime::parse_from_str(current, "%Y-%m-%dT%H:%M:%SZ").unwrap();
             let current = current + chrono::Duration::hours(1);
             (format!("{}", current.format("%Y-%m-%dT%H:%M:%SZ")), current)
         };
@@ -221,28 +221,39 @@ impl QueryBuilder {
         let value_end_time =
             chrono::NaiveDateTime::parse_from_str(&end_time, "%Y-%m-%dT%H:%M:%SZ").unwrap();
         let (mut end_time_str, mut end_time_date) = advance_time(&start_time);
+        let mut start_time_str = start_time;
+        let mut start_time_date =
+            chrono::NaiveDateTime::parse_from_str(&start_time_str, "%Y-%m-%dT%H:%M:%SZ").unwrap();
 
         let mut queries = Vec::new();
 
-        while end_time_date < value_end_time {
-            queries.push(
-                format!(
-                    r#"docker run grafana/logcli:main-926a0b2-amd64 query --addr={} --timezone=UTC --from="{}" --to="{}" '{{chain="{}" {}}} {} {}' --batch {} --limit {}"#,
-                    addr,
-                    start_time,
-                    end_time_str,
-                    chain,
-                    levels,
-                    exclude_common_errors,
-                    self.appended_query,
-                    self.batch,
-                    self.limit,
-                )
-            );
+        let build_query = |start_time_str: &str, end_time_str: &str| {
+            format!(
+                r#"docker run grafana/logcli:main-926a0b2-amd64 query --addr={} --timezone=UTC --from="{}" --to="{}" '{{chain="{}" {}}} {} {}' --batch {} --limit {}"#,
+                addr,
+                start_time_str,
+                end_time_str,
+                chain,
+                levels,
+                exclude_common_errors,
+                self.appended_query,
+                self.batch,
+                self.limit,
+            )
+        };
 
-            start_time = end_time_str.clone();
+        while end_time_date < value_end_time {
+            queries.push(build_query(&start_time_str, &end_time_str));
+
+            (start_time_str, start_time_date) = (end_time_str.clone(), end_time_date);
             (end_time_str, end_time_date) = advance_time(&end_time_str);
         }
+
+        if start_time_date < value_end_time {
+            queries.push(build_query(&start_time_str, &end_time));
+        }
+
+        log::debug!("Queries: {:?}", queries);
 
         queries
     }
