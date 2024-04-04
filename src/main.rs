@@ -101,6 +101,10 @@ struct Config {
     /// The format is "YYYY-MM-DDTHH:MM:SSZ".
     #[clap(long)]
     end_time: Option<String>,
+
+    /// Provide the raw lines from the query.
+    #[clap(long)]
+    raw: bool,
 }
 
 fn run_warn_err(opts: Config) -> Result<(), Box<dyn std::error::Error>> {
@@ -119,7 +123,7 @@ fn run_warn_err(opts: Config) -> Result<(), Box<dyn std::error::Error>> {
     let result = query::QueryRunner::run(&query)?;
     let result = String::from_utf8_lossy(&result);
 
-    let mut grouped_err: Vec<_> = GROUPED.iter().map(|&x| (x, 0)).collect();
+    let mut grouped_err: Vec<_> = GROUPED.iter().map(|&x| (x, vec![])).collect();
     let mut unknown_lines = Vec::with_capacity(1024);
 
     for line in result.lines() {
@@ -135,7 +139,7 @@ fn run_warn_err(opts: Config) -> Result<(), Box<dyn std::error::Error>> {
         let mut found = false;
         for (key, value) in grouped_err.iter_mut() {
             if line.contains(*key) {
-                *value += 1;
+                value.push(line);
                 found = true;
                 // We are not interested in the rest of the keys, they should not be a subset of each other.
                 break;
@@ -150,19 +154,17 @@ fn run_warn_err(opts: Config) -> Result<(), Box<dyn std::error::Error>> {
 
     println!();
     println!();
-    println!(
-        "{0: <135} | {1:<10}",
-        "Triage logs -------------------", "Count"
-    );
+    println!("{0: <10} | {1:<135}", "Count", "Triage report");
 
-    grouped_err.sort_by_key(|(_key, value)| std::cmp::Reverse(*value));
+    grouped_err.sort_by_key(|(_key, value)| std::cmp::Reverse(value.len()));
+
     for (key, value) in grouped_err.iter() {
-        if value == &0 {
+        if value.is_empty() {
             continue;
         }
 
-        println!("{0: <135} | {1:<10}", key, value);
-        stats.warning_err += value;
+        println!("{0: <10} | {1:<135}", value.len(), key);
+        stats.warning_err += value.len();
     }
 
     println!(
@@ -170,6 +172,20 @@ fn run_warn_err(opts: Config) -> Result<(), Box<dyn std::error::Error>> {
         unknown_lines.len(),
         unknown_lines
     );
+
+    if opts.raw {
+        for (key, value) in grouped_err.iter() {
+            if value.is_empty() {
+                continue;
+            }
+
+            println!("{0: <10} | {1:<135}", value.len(), key);
+            for line in value {
+                println!("  - {}", line);
+            }
+            println!();
+        }
+    }
 
     Ok(())
 }
