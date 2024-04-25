@@ -2,7 +2,7 @@ use clap::Parser as ClapParser;
 
 pub mod query;
 
-const GROUPED: [&str; 27] = [
+const GROUPED: [&str; 34] = [
     // peerset:
     "Reason: BEEFY: Round vote message. Banned, disconnecting",
     "Reason: BEEFY: Not interested in round. Banned, disconnecting",
@@ -16,6 +16,8 @@ const GROUPED: [&str; 27] = [
     "Reason: Duplicate gossip. Banned, disconnecting",
     "Reason: BEEFY: Future message. Banned, disconnecting",
     "Reason: A collator was reported by another subsystem. Banned, disconnecting",
+    "Same block request multiple times",
+    "reason: Peer disconnected",
 
     "Trying to remove unknown reserved node",
 
@@ -42,6 +44,21 @@ const GROUPED: [&str; 27] = [
     "dispute-coordinator: Received msg before first active leaves update. This is not expected - message will be dropped",
     // Grandpa:
     "grandpa: Re-finalized block",
+
+    // DB pinning:
+    "db::notification_pinning: Notification block pinning limit reached.",
+
+    // Beefy:
+    "Error: ConsensusReset. Restarting voter.",
+
+    // Litep2p:
+    "litep2p::ipfs::identify: inbound identify substream opened for peer who doesn't exist peer=",
+
+    // Telemetry missing:
+    "Error while dialing /dns/telemetry",
+
+
+    "because all validation slots for this peer are occupied.",
 ];
 
 #[derive(Debug)]
@@ -88,6 +105,10 @@ struct Config {
     #[clap(long, default_value = "http://loki.parity-versi.parity.io")]
     address: String,
 
+    /// Optionally provide a file for parsing instead of querying the Loki instance.
+    #[clap(long)]
+    file: Option<String>,
+
     /// The chain to query.
     #[clap(long, default_value = "versi-networking")]
     chain: String,
@@ -107,15 +128,13 @@ struct Config {
     raw: bool,
 }
 
-fn process_lines(
-    bytes: &[u8],
+fn process_lines<'a>(
+    lines: impl Iterator<Item = &'a str>,
     stats: &mut Stats,
     grouped_err: &mut [(&str, Vec<String>)],
     unknown_lines: &mut Vec<String>,
 ) {
-    let result = String::from_utf8_lossy(bytes);
-
-    for line in result.lines() {
+    for line in lines {
         log::debug!("{}", line);
 
         stats.total += 1;
@@ -146,27 +165,39 @@ fn run_warn_err(opts: Config) -> Result<(), Box<dyn std::error::Error>> {
     log::info!("Running WarnErr query");
     let mut stats = Stats::new();
 
-    // Build the query.
-    let queries = query::QueryBuilder::new()
-        .address(opts.address)
-        .chain(opts.chain)
-        .levels(vec!["WARN".to_string(), "ERROR".to_string()])
-        .set_time(opts.start_time, opts.end_time)
-        .build_chunks();
-
     let mut grouped_err: Vec<_> = GROUPED.iter().map(|&x| (x, vec![])).collect();
     let mut unknown_lines = Vec::with_capacity(1024);
 
-    // Run the queries.
-    for query in queries {
-        let result_bytes = query::QueryRunner::run(&query)?;
+    if let Some(file) = &opts.file {
+        let bytes = std::fs::read(file)?;
+        let result = String::from_utf8_lossy(&bytes);
 
-        process_lines(
-            &result_bytes,
-            &mut stats,
-            &mut grouped_err,
-            &mut unknown_lines,
-        );
+        let lines = result
+            .lines()
+            .filter(|x| x.contains("WARN") || x.contains("ERROR"));
+
+        process_lines(lines, &mut stats, &mut grouped_err, &mut unknown_lines);
+    } else {
+        // Build the query.
+        let queries = query::QueryBuilder::new()
+            .address(opts.address)
+            .chain(opts.chain)
+            .levels(vec!["WARN".to_string(), "ERROR".to_string()])
+            .set_time(opts.start_time, opts.end_time)
+            .build_chunks();
+
+        // Run the queries.
+        for query in queries {
+            let bytes = query::QueryRunner::run(&query)?;
+            let result = String::from_utf8_lossy(&bytes);
+
+            process_lines(
+                result.lines(),
+                &mut stats,
+                &mut grouped_err,
+                &mut unknown_lines,
+            );
+        }
     }
 
     println!();
