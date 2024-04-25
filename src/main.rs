@@ -112,43 +112,45 @@ fn run_warn_err(opts: Config) -> Result<(), Box<dyn std::error::Error>> {
     let mut stats = Stats::new();
 
     // Build the query.
-    let query = query::QueryBuilder::new()
+    let queries = query::QueryBuilder::new()
         .address(opts.address)
         .chain(opts.chain)
         .levels(vec!["WARN".to_string(), "ERROR".to_string()])
         .set_time(opts.start_time, opts.end_time)
-        .build();
-
-    // Run the query.
-    let result = query::QueryRunner::run(&query)?;
-    let result = String::from_utf8_lossy(&result);
+        .build_chunks();
 
     let mut grouped_err: Vec<_> = GROUPED.iter().map(|&x| (x, vec![])).collect();
     let mut unknown_lines = Vec::with_capacity(1024);
 
-    for line in result.lines() {
-        log::debug!("{}", line);
+    // Run the queries.
+    for query in queries {
+        let result_bytes = query::QueryRunner::run(&query)?;
+        let result = String::from_utf8_lossy(&result_bytes);
 
-        stats.total += 1;
+        for line in result.lines() {
+            log::debug!("{}", line);
 
-        if line.is_empty() {
-            stats.empty_lines += 1;
-            continue;
-        }
+            stats.total += 1;
 
-        let mut found = false;
-        for (key, value) in grouped_err.iter_mut() {
-            if line.contains(*key) {
-                value.push(line);
-                found = true;
-                // We are not interested in the rest of the keys, they should not be a subset of each other.
-                break;
+            if line.is_empty() {
+                stats.empty_lines += 1;
+                continue;
             }
-        }
 
-        if !found {
-            stats.unknown += 1;
-            unknown_lines.push(line);
+            let mut found = false;
+            for (key, value) in grouped_err.iter_mut() {
+                if line.contains(*key) {
+                    value.push(line.to_string());
+                    found = true;
+                    // We are not interested in the rest of the keys, they should not be a subset of each other.
+                    break;
+                }
+            }
+
+            if !found {
+                stats.unknown += 1;
+                unknown_lines.push(line.to_string());
+            }
         }
     }
 
