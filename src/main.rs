@@ -107,6 +107,41 @@ struct Config {
     raw: bool,
 }
 
+fn process_lines(
+    bytes: &[u8],
+    stats: &mut Stats,
+    grouped_err: &mut [(&str, Vec<String>)],
+    unknown_lines: &mut Vec<String>,
+) {
+    let result = String::from_utf8_lossy(bytes);
+
+    for line in result.lines() {
+        log::debug!("{}", line);
+
+        stats.total += 1;
+
+        if line.is_empty() {
+            stats.empty_lines += 1;
+            continue;
+        }
+
+        let mut found = false;
+        for (key, value) in grouped_err.iter_mut() {
+            if line.contains(*key) {
+                value.push(line.to_string());
+                found = true;
+                // We are not interested in the rest of the keys, they should not be a subset of each other.
+                break;
+            }
+        }
+
+        if !found {
+            stats.unknown += 1;
+            unknown_lines.push(line.to_string());
+        }
+    }
+}
+
 fn run_warn_err(opts: Config) -> Result<(), Box<dyn std::error::Error>> {
     log::info!("Running WarnErr query");
     let mut stats = Stats::new();
@@ -125,33 +160,13 @@ fn run_warn_err(opts: Config) -> Result<(), Box<dyn std::error::Error>> {
     // Run the queries.
     for query in queries {
         let result_bytes = query::QueryRunner::run(&query)?;
-        let result = String::from_utf8_lossy(&result_bytes);
 
-        for line in result.lines() {
-            log::debug!("{}", line);
-
-            stats.total += 1;
-
-            if line.is_empty() {
-                stats.empty_lines += 1;
-                continue;
-            }
-
-            let mut found = false;
-            for (key, value) in grouped_err.iter_mut() {
-                if line.contains(*key) {
-                    value.push(line.to_string());
-                    found = true;
-                    // We are not interested in the rest of the keys, they should not be a subset of each other.
-                    break;
-                }
-            }
-
-            if !found {
-                stats.unknown += 1;
-                unknown_lines.push(line.to_string());
-            }
-        }
+        process_lines(
+            &result_bytes,
+            &mut stats,
+            &mut grouped_err,
+            &mut unknown_lines,
+        );
     }
 
     println!();
