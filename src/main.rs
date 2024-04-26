@@ -2,7 +2,7 @@ use clap::Parser as ClapParser;
 
 pub mod query;
 
-const GROUPED: [&str; 34] = [
+const GROUPED: [&str; 35] = [
     // peerset:
     "Reason: BEEFY: Round vote message. Banned, disconnecting",
     "Reason: BEEFY: Not interested in round. Banned, disconnecting",
@@ -50,13 +50,13 @@ const GROUPED: [&str; 34] = [
 
     // Beefy:
     "Error: ConsensusReset. Restarting voter.",
+    "no BEEFY authority key found in store",
 
     // Litep2p:
     "litep2p::ipfs::identify: inbound identify substream opened for peer who doesn't exist peer=",
 
     // Telemetry missing:
     "Error while dialing /dns/telemetry",
-
 
     "because all validation slots for this peer are occupied.",
 ];
