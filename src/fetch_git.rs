@@ -46,6 +46,51 @@ pub struct RegexDetails {
     pub ty: String,
 }
 
+fn trim_dummy_chars(ch: char) -> bool {
+    ch == '"' || ch == ',' || ch == ' ' || ch == '\\'
+}
+
+fn extract_log_line<'a>(mut line: &'a str) -> Option<&'a str> {
+    while let Some(in_start) = line.find(',') {
+        // Must contain any whitespace followed by quot.
+        let in_str = &line[in_start + 1..];
+
+        // Advance for the next search.
+        line = &line[in_start + 1..];
+
+        let in_end = in_str.find("\"").unwrap_or_default();
+
+        let to_find_str = &in_str[..in_end];
+        if to_find_str.chars().all(|c| c.is_whitespace()) {
+            if in_str.len() < in_end + 1 {
+                break;
+            }
+
+            let new_str = &in_str[in_end + 1..];
+            let new_end = new_str.find("\"").unwrap_or_default();
+            let mut new_str = &new_str[..new_end];
+
+            // Check for multiline.
+            if let Some(new) = new_str.lines().next() {
+                new_str = new;
+            }
+
+            new_str = new_str.trim_end_matches(trim_dummy_chars);
+
+            log::debug!("Found str line {}", new_str);
+
+            return Some(&new_str);
+        }
+    }
+
+    // The multiline could not be extracted.
+    Some(
+        line.trim()
+            .trim_end_matches(trim_dummy_chars)
+            .trim_start_matches(trim_dummy_chars),
+    )
+}
+
 pub fn build_regexes(data: Vec<(String, String)>) -> Vec<(regex::Regex, RegexDetails)> {
     let mut regexes = Vec::new();
 
@@ -70,50 +115,14 @@ pub fn build_regexes(data: Vec<(String, String)>) -> Vec<(regex::Regex, RegexDet
                 str_content = &str_content[start + end..];
 
                 // Handle multiline case.
-                let mut current_str = str;
-                let mut multiline_search = None;
-                while let Some(in_start) = current_str.find(',') {
-                    // Must contain any whitespace followed by ".
-                    let in_str = &current_str[in_start + 1..];
-
-                    // Advance for the next search.
-                    current_str = &current_str[in_start + 1..];
-
-                    let in_end = in_str.find("\"").unwrap_or_default();
-
-                    let to_find_str = &in_str[..in_end];
-                    if to_find_str.chars().all(|c| c.is_whitespace()) {
-                        if in_str.len() < in_end + 1 {
-                            break;
-                        }
-
-                        let new_str = &in_str[in_end + 1..];
-                        let new_end = new_str.find("\"").unwrap_or_default();
-                        let mut new_str = &new_str[..new_end];
-
-                        // Check for multiline.
-                        if let Some(new) = new_str.lines().next() {
-                            new_str = new;
-                        }
-
-                        new_str =
-                            new_str.trim_end_matches(|ch| ch == ',' || ch == ' ' || ch == '\\');
-
-                        log::debug!("Found str line {}", new_str);
-
-                        multiline_search = Some(new_str);
-                        break;
-                    }
-                }
-
+                let current_str = str;
+                let multiline_search = extract_log_line(current_str);
                 let Some(line_matched) = multiline_search else {
                     continue;
                 };
-
                 if line_matched.is_empty() {
                     continue;
                 }
-                log::debug!("Line matched {}", line_matched);
 
                 let mut counting_brackets = 0;
                 let mut num_braces = 0;
@@ -182,12 +191,12 @@ pub fn build_regexes(data: Vec<(String, String)>) -> Vec<(regex::Regex, RegexDet
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use super::*;
 
     #[tokio::test]
     async fn test_inputs() {
-        use regex::Regex;
-
         let string = "        log::info!(\"Running panic query\");
         let mut stats = Stats::new();
 
@@ -231,7 +240,7 @@ mod tests {
 
         let result = build_regexes(vec![("test.rs".to_string(), string.to_string())]);
 
-        let expected = [
+        let expected: HashSet<_> = [
             // Warns
             "Failed to prove .* parachain",
             "Missing `per_leaf` for known active",
@@ -241,12 +250,12 @@ mod tests {
             // Errors
             "Running panic query11",
             "Missing public key for validator",
-        ];
+        ]
+        .into_iter()
+        .map(|s| s.to_string())
+        .collect();
 
-        for (regex, details) in &result {
-            println!("{:?} {:?}", regex, details);
-        }
-
-        assert_eq!(result.len(), expected.len());
+        let regex_results: HashSet<_> = result.iter().map(|(regex, _)| regex.to_string()).collect();
+        assert_eq!(regex_results, expected);
     }
 }
