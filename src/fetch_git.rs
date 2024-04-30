@@ -51,6 +51,19 @@ fn trim_dummy_chars(ch: char) -> bool {
 }
 
 fn extract_log_line<'a>(mut line: &'a str) -> Option<&'a str> {
+    line = line.trim();
+
+    if line.starts_with('\"') {
+        line = &line[1..];
+
+        let end = line.find('\"').unwrap_or_default();
+        let line = &line[..end];
+        return Some(
+            line.trim_end_matches(trim_dummy_chars)
+                .trim_start_matches(trim_dummy_chars),
+        );
+    }
+
     while let Some(in_start) = line.find(',') {
         // Must contain any whitespace followed by quot.
         let in_str = &line[in_start + 1..];
@@ -85,14 +98,15 @@ fn extract_log_line<'a>(mut line: &'a str) -> Option<&'a str> {
 
     // The multiline could not be extracted.
     Some(
-        line.trim()
-            .trim_end_matches(trim_dummy_chars)
+        line.trim_end_matches(trim_dummy_chars)
             .trim_start_matches(trim_dummy_chars),
     )
 }
 
 pub fn build_regexes(data: Vec<(String, String)>) -> Vec<(regex::Regex, RegexDetails)> {
     let mut regexes = Vec::new();
+
+    let mut encountered_logs = 0;
 
     for (file_path, content) in data {
         // How the log lines look like.
@@ -103,6 +117,8 @@ pub fn build_regexes(data: Vec<(String, String)>) -> Vec<(regex::Regex, RegexDet
             let len_searched = searched.len();
 
             while let Some(start) = str_content.find(searched) {
+                encountered_logs += 1;
+
                 let end = if let Some(end) = str_content[start..].find(");") {
                     end
                 } else if let Some(end) = str_content[start..].find("),") {
@@ -122,9 +138,11 @@ pub fn build_regexes(data: Vec<(String, String)>) -> Vec<(regex::Regex, RegexDet
                 let current_str = str;
                 let multiline_search = extract_log_line(current_str);
                 let Some(line_matched) = multiline_search else {
+                    log::debug!("Skipped parsing: {:?}", current_str);
                     continue;
                 };
                 if line_matched.is_empty() {
+                    log::debug!("Skipped empty: {:?}", current_str);
                     continue;
                 }
 
@@ -151,6 +169,7 @@ pub fn build_regexes(data: Vec<(String, String)>) -> Vec<(regex::Regex, RegexDet
 
                 // Only `{}` like lines.
                 if line_matched.len() == num_braces * 2 {
+                    log::debug!("Skipped only brackets: {:?}", current_str);
                     continue;
                 }
 
@@ -163,11 +182,13 @@ pub fn build_regexes(data: Vec<(String, String)>) -> Vec<(regex::Regex, RegexDet
 
                 let has_chars = regexed_line.chars().any(|c| c.is_alphabetic());
                 if !has_chars {
+                    log::debug!("Skipped not having chars: {:?}", current_str);
                     continue;
                 }
 
                 log::debug!("Regexed line {}", regexed_line);
                 if regexed_line.len() < 10 {
+                    log::debug!("Skipped len < 10: {:?}", current_str);
                     continue;
                 }
 
@@ -190,36 +211,42 @@ pub fn build_regexes(data: Vec<(String, String)>) -> Vec<(regex::Regex, RegexDet
         }
     }
 
+    log::info!(
+        "Encountered num logs {} and parsed {} regexes with {:.2}% coverage",
+        encountered_logs,
+        regexes.len(),
+        (regexes.len() as f64 / encountered_logs as f64) * 100.0
+    );
+
     regexes
 }
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
-
     use super::*;
+    use std::collections::HashSet;
 
     #[tokio::test]
     async fn test_inputs() {
-        let string = "        log::info!(\"Running panic query\");
+        let string = r#"        log::info!("Running panic query");
         let mut stats = Stats::new();
 
         log::error!(
-            \"Running panic query11\");
+            "Running panic query11");
     
-        log::info!(target: \"bridge\", \"Connecting to {} {}\");
+        log::info!(target: "bridge", "Connecting to {} {}");
     
-        log::warn!(target: \"bridge\",
-                            \"Failed to prove {} parachain\");
+        log::warn!(target: "bridge",
+                            "Failed to prove {} parachain");
                             
 
-    warn!(target: LOG_TARGET, \"Missing `per_leaf` for known active\");
+    warn!(target: LOG_TARGET, "Missing `per_leaf` for known active");
 
     warn!(
                             target: LOG_TARGET,
                             ?session,
                             ?err,
-                            \"Could not retrieve session info from RuntimeInfo\",
+                            "Could not retrieve session info from RuntimeInfo",
                         );
     
 
@@ -227,20 +254,35 @@ mod tests {
                                     target: LOG_TARGET,
                                     ?session,
                                     ?validator_index,
-                                    \"Missing public key for validator\",
+                                    "Missing public key for validator",
                                 );
     
 
     warn!(
                     target: LOG_TARGET,
-                    \"Validation code unavailable for code hash {:?} in the state of block {:?}\",
+                    "Validation code unavailable for code hash {:?} in the state of block {:?}",
                     req.candidate_receipt().descriptor.validation_code_hash,
                     block_hash,
                 );
 
 
 
-    warn!(target: LOG_TARGET, \"{peer:?} banned, disconnecting, reason: {}\", reputation_change.reason);";
+    warn!(target: LOG_TARGET, "{peer:?} banned, disconnecting, reason: {}", reputation_change.reason);
+
+
+    tracing::error!("Failed to initialize overseer: {}", e);
+
+    error!("Checking inherent with identifier `{:?}` failed", e.0);
+
+    log::error!("XCMP queue for sibling {:?} is full; dropping messages.", sender);
+
+
+    log::error!(
+        "`clear_prefix` failed to remove all keys for {}. THIS SHOULD NEVER HAPPEN! 🚨",
+        P::get()
+    );
+    
+    "#;
 
         let result = build_regexes(vec![("test.rs".to_string(), string.to_string())]);
 
@@ -254,12 +296,17 @@ mod tests {
             // Errors
             "Running panic query11",
             "Missing public key for validator",
+            "Failed to initialize overseer: .*",
+            "Checking inherent with identifier `.*` failed",
+            "XCMP queue for sibling .* is full; dropping messages.",
+            "`clear_prefix` failed to remove all keys for .*. THIS SHOULD NEVER HAPPEN! 🚨",
         ]
         .into_iter()
         .map(|s| s.to_string())
         .collect();
 
         let regex_results: HashSet<_> = result.iter().map(|(regex, _)| regex.to_string()).collect();
+        assert_eq!(regex_results.len(), expected.len());
         assert_eq!(regex_results, expected);
     }
 }
