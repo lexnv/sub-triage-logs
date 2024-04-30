@@ -165,6 +165,10 @@ fn run_warn_err(
         }
     }
 
+    // Sort the found lines by occurrence.
+    let mut found_lines: Vec<_> = found_lines.into_iter().collect();
+    found_lines.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
+
     println!();
     println!();
     println!("{0: <10} | {1:<135}", "Count", "Triage report");
@@ -262,10 +266,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .await?;
     let matches = fetch_git::build_regexes(files);
-    log::info!("Total regexes: {}", matches.len());
 
     let args = Command::parse();
-
     match args {
         Command::WarnErr(opts) => run_warn_err(opts, &matches),
         Command::Panics(opts) => run_panics(opts),

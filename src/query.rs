@@ -211,7 +211,7 @@ impl QueryBuilder {
             .unwrap_or(DEFAULT_CHAIN.to_string());
 
         let advance_time = |current: &str| {
-            log::info!("Current time: {}", current);
+            log::debug!("Current time: {}", current);
             let current =
                 chrono::NaiveDateTime::parse_from_str(current, "%Y-%m-%dT%H:%M:%SZ").unwrap();
             let current = current + chrono::Duration::hours(1);
@@ -270,14 +270,13 @@ impl QueryRunner {
             .arg("-c")
             .arg(query)
             .output()?;
-        log::info!("Query completed in {:?}", now.elapsed());
 
         if !result.status.success() {
             log::error!("Query failed: {}", String::from_utf8_lossy(&result.stderr));
             return Err("Query failed".into());
         }
 
-        log::info!("Query completed successfully");
+        log::info!("Query completed in {:?}", now.elapsed());
         Ok(result.stdout)
     }
 }
