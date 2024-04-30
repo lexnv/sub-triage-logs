@@ -1,65 +1,11 @@
+use std::collections::HashMap;
+
 use clap::Parser as ClapParser;
+use fetch_git::RegexDetails;
+use regex::Regex;
 
+pub mod fetch_git;
 pub mod query;
-
-const GROUPED: [&str; 35] = [
-    // peerset:
-    "Reason: BEEFY: Round vote message. Banned, disconnecting",
-    "Reason: BEEFY: Not interested in round. Banned, disconnecting",
-    "Reason: Invalid justification. Banned, disconnecting",
-    "Reason: Aggregated reputation change. Banned, disconnecting",
-    "Reason: Successful gossip. Banned, disconnecting",
-    "Reason: Grandpa: Neighbor message. Banned, disconnecting",
-    "Reason: Grandpa: Past message. Banned, disconnecting",
-    "Reason: Grandpa: Round message. Banned, disconnecting",
-    "Reason: BEEFY: Justification. Banned, disconnecting",
-    "Reason: Duplicate gossip. Banned, disconnecting",
-    "Reason: BEEFY: Future message. Banned, disconnecting",
-    "Reason: A collator was reported by another subsystem. Banned, disconnecting",
-    "Same block request multiple times",
-    "reason: Peer disconnected",
-
-    "Trying to remove unknown reserved node",
-
-    "babe: 👶 Epoch(s) skipped:",
-    "babe: Error with block built on",
-    "sync: 💔 Called `on_validated_block_announce` with a bad peer ID",
-
-    "parachain::availability-store: Candidate included without being backed?",
-    "parachain::availability-distribution: fetch_pov_job err=FetchPoV(NetworkError(NotConnected))",
-    "parachain::availability-distribution: fetch_pov_job err=FetchPoV(NetworkError(Refused))",
-    "parachain::availability-distribution: fetch_pov_job err=FetchPoV(NetworkError(Network(DialFailure)))",
-    "parachain::dispute-coordinator: Attempted import of on-chain backing votes failed",
-
-    // Note: These are the same, however substrate added an extra `\n`.
-    "parachain::statement-distribution: Cluster has too many pending statements, something wrong with our connection to our group peers",
-    "Restart might be needed if validator gets 0 backing rewards for more than 3-4 consecutive sessions",
-
-
-    // collator-protocol:
-    "Fetching collation failed due to network error",
-    // chain-selection:
-    "chain-selection: Call to `DetermineUndisputedChain` failed error=DetermineUndisputedChainCanceled(Canceled)",
-    // disputes:
-    "dispute-coordinator: Received msg before first active leaves update. This is not expected - message will be dropped",
-    // Grandpa:
-    "grandpa: Re-finalized block",
-
-    // DB pinning:
-    "db::notification_pinning: Notification block pinning limit reached.",
-
-    // Beefy:
-    "Error: ConsensusReset. Restarting voter.",
-    "no BEEFY authority key found in store",
-
-    // Litep2p:
-    "litep2p::ipfs::identify: inbound identify substream opened for peer who doesn't exist peer=",
-
-    // Telemetry missing:
-    "Error while dialing /dns/telemetry",
-
-    "because all validation slots for this peer are occupied.",
-];
 
 #[derive(Debug)]
 struct Stats {
@@ -131,9 +77,12 @@ struct Config {
 fn process_lines<'a>(
     lines: impl Iterator<Item = &'a str>,
     stats: &mut Stats,
-    grouped_err: &mut [(&str, Vec<String>)],
     unknown_lines: &mut Vec<String>,
+    regexes: &[(Regex, RegexDetails)],
+    found_lines: &mut HashMap<String, Vec<String>>,
 ) {
+    let now = std::time::Instant::now();
+
     for line in lines {
         log::debug!("{}", line);
 
@@ -145,11 +94,15 @@ fn process_lines<'a>(
         }
 
         let mut found = false;
-        for (key, value) in grouped_err.iter_mut() {
-            if line.contains(*key) {
-                value.push(line.to_string());
+
+        for (reg, _) in regexes {
+            if reg.is_match(line) {
+                found_lines
+                    .entry(reg.to_string())
+                    .or_default()
+                    .push(line.to_string());
+
                 found = true;
-                // We are not interested in the rest of the keys, they should not be a subset of each other.
                 break;
             }
         }
@@ -159,14 +112,19 @@ fn process_lines<'a>(
             unknown_lines.push(line.to_string());
         }
     }
+
+    log::info!(" Processing line took {:?}", now.elapsed());
 }
 
-fn run_warn_err(opts: Config) -> Result<(), Box<dyn std::error::Error>> {
+fn run_warn_err(
+    opts: Config,
+    regexes: &[(Regex, RegexDetails)],
+) -> Result<(), Box<dyn std::error::Error>> {
     log::info!("Running WarnErr query");
     let mut stats = Stats::new();
 
-    let mut grouped_err: Vec<_> = GROUPED.iter().map(|&x| (x, vec![])).collect();
     let mut unknown_lines = Vec::with_capacity(1024);
+    let mut found_lines = HashMap::new();
 
     if let Some(file) = &opts.file {
         let bytes = std::fs::read(file)?;
@@ -176,7 +134,13 @@ fn run_warn_err(opts: Config) -> Result<(), Box<dyn std::error::Error>> {
             .lines()
             .filter(|x| x.contains("WARN") || x.contains("ERROR"));
 
-        process_lines(lines, &mut stats, &mut grouped_err, &mut unknown_lines);
+        process_lines(
+            lines,
+            &mut stats,
+            &mut unknown_lines,
+            regexes,
+            &mut found_lines,
+        );
     } else {
         // Build the query.
         let queries = query::QueryBuilder::new()
@@ -194,8 +158,9 @@ fn run_warn_err(opts: Config) -> Result<(), Box<dyn std::error::Error>> {
             process_lines(
                 result.lines(),
                 &mut stats,
-                &mut grouped_err,
                 &mut unknown_lines,
+                regexes,
+                &mut found_lines,
             );
         }
     }
@@ -204,9 +169,7 @@ fn run_warn_err(opts: Config) -> Result<(), Box<dyn std::error::Error>> {
     println!();
     println!("{0: <10} | {1:<135}", "Count", "Triage report");
 
-    grouped_err.sort_by_key(|(_key, value)| std::cmp::Reverse(value.len()));
-
-    for (key, value) in grouped_err.iter() {
+    for (key, value) in found_lines.iter() {
         if value.is_empty() {
             continue;
         }
@@ -222,7 +185,7 @@ fn run_warn_err(opts: Config) -> Result<(), Box<dyn std::error::Error>> {
     );
 
     if opts.raw {
-        for (key, value) in grouped_err.iter() {
+        for (key, value) in found_lines.iter() {
             if value.is_empty() {
                 continue;
             }
@@ -289,13 +252,22 @@ fn run_panics(opts: Config) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
+
+    let files = fetch_git::fetch(
+        "https://github.com/paritytech/polkadot-sdk/".into(),
+        "master".into(),
+    )
+    .await?;
+    let matches = fetch_git::build_regexes(files);
+    log::info!("Total regexes: {}", matches.len());
 
     let args = Command::parse();
 
     match args {
-        Command::WarnErr(opts) => run_warn_err(opts),
+        Command::WarnErr(opts) => run_warn_err(opts, &matches),
         Command::Panics(opts) => run_panics(opts),
     }
 }
