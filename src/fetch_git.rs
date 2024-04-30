@@ -103,7 +103,11 @@ pub fn build_regexes(data: Vec<(String, String)>) -> Vec<(regex::Regex, RegexDet
             let len_searched = searched.len();
 
             while let Some(start) = str_content.find(searched) {
-                let Some(end) = str_content[start..].find(");") else {
+                let end = if let Some(end) = str_content[start..].find(");") {
+                    end
+                } else if let Some(end) = str_content[start..].find("),") {
+                    end
+                } else {
                     // Note: The file must be malformed, don't assume the log ends at the eof.
                     log::error!("File {file_path} is malformed {start}:..");
                     break;
