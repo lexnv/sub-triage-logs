@@ -110,7 +110,7 @@ pub fn build_regexes(data: Vec<(String, String)>) -> Vec<(regex::Regex, RegexDet
 
     for (file_path, content) in data {
         // How the log lines look like.
-        let searched_for = ["error!(", "warn!("];
+        let searched_for = ["error!(", "warn!(", "warn_if_frequent!("];
 
         for searched in searched_for {
             let mut str_content = &content[..];
