@@ -59,6 +59,10 @@ struct Config {
     #[clap(long, default_value = "versi-networking")]
     chain: String,
 
+    /// The node to query.
+    #[clap(long)]
+    node: Option<String>,
+
     /// The start time of the query.
     /// The format is "YYYY-MM-DDTHH:MM:SSZ".
     #[clap(long)]
@@ -174,6 +178,7 @@ async fn run_warn_err(opts: Config) -> Result<(), Box<dyn std::error::Error>> {
             .levels(vec!["WARN".to_string(), "ERROR".to_string()])
             .set_time(opts.start_time, opts.end_time)
             .org_id(opts.org_id)
+            .node(opts.node)
             .build_chunks();
 
         // Run the queries.

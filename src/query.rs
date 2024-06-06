@@ -18,6 +18,7 @@ pub struct QueryBuilder {
     exclude_common_errors: bool,
     appended_query: String,
     org_id: Option<String>,
+    node: Option<String>,
 }
 
 impl Default for QueryBuilder {
@@ -40,6 +41,7 @@ impl QueryBuilder {
             exclude_common_errors: true,
             appended_query: String::new(),
             org_id: None,
+            node: None,
         }
     }
 
@@ -114,8 +116,18 @@ impl QueryBuilder {
     }
 
     /// Set the organization ID.
+    ///
+    /// Default: None.
     pub fn org_id(mut self, org_id: Option<String>) -> Self {
         self.org_id = org_id;
+        self
+    }
+
+    /// Set the node name.
+    ///
+    /// Default: None.
+    pub fn node(mut self, node: Option<String>) -> Self {
+        self.node = node;
         self
     }
 
@@ -165,14 +177,20 @@ impl QueryBuilder {
         let org_id = self
             .org_id
             .as_ref()
-            .map(|org_id| format!(r#" --org-id='{}' "#, org_id))
+            .map(|org_id| format!(r#" --org-id='{org_id}' "#))
+            .unwrap_or_default();
+
+        let node = self
+            .node
+            .as_ref()
+            .map(|node| format!(r#", node="{node}" "#))
             .unwrap_or_default();
 
         let batch = self.batch;
         let limit = self.limit;
 
         format!(
-            r#"docker run grafana/logcli:main-926a0b2-amd64 query --addr={addr} --timezone=UTC --from="{start_time}" --to="{end_time}" '{{chain="{chain}" {levels}}} {exclude_common_errors}' --batch {batch} --limit {limit} {org_id}"#,
+            r#"docker run grafana/logcli:main-926a0b2-amd64 query --addr={addr} --timezone=UTC --from="{start_time}" --to="{end_time}" '{{chain="{chain}" {levels} {node}}} {exclude_common_errors}' --batch {batch} --limit {limit} {org_id}"#,
         )
     }
 
@@ -246,9 +264,15 @@ impl QueryBuilder {
         let limit = self.limit;
         let appended_query = &self.appended_query;
 
+        let node = self
+            .node
+            .as_ref()
+            .map(|node| format!(r#", node="{node}" "#))
+            .unwrap_or_default();
+
         let build_query = |start_time_str: &str, end_time_str: &str| {
             format!(
-                r#"docker run grafana/logcli:main-926a0b2-amd64 query --addr={addr} --timezone=UTC --from="{start_time_str}" --to="{end_time_str}" '{{chain="{chain}" {levels}}} {exclude_common_errors} {appended_query}' --batch {batch} --limit {limit} {org_id}"#,
+                r#"docker run grafana/logcli:main-926a0b2-amd64 query --addr={addr} --timezone=UTC --from="{start_time_str}" --to="{end_time_str}" '{{chain="{chain}" {levels} {node}}} {exclude_common_errors} {appended_query}' --batch {batch} --limit {limit} {org_id}"#,
             )
         };
 
