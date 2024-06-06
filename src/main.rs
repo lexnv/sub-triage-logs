@@ -73,8 +73,17 @@ struct Config {
     #[clap(long)]
     org_id: Option<String>,
 
+    /// Skip building the regexes.
     #[clap(long)]
-    skip_build: bool,
+    skip_regex_build: bool,
+
+    /// Build the regexes from a repository.
+    #[clap(long, default_value = "https://github.com/paritytech/polkadot-sdk/")]
+    regex_repo: Option<String>,
+
+    /// Build the regexes from the branch
+    #[clap(long, default_value = "master")]
+    regex_branch: Option<String>,
 
     /// Provide the raw lines from the query.
     #[clap(long)]
@@ -130,10 +139,10 @@ async fn run_warn_err(opts: Config) -> Result<(), Box<dyn std::error::Error>> {
     let mut unknown_lines = Vec::with_capacity(1024);
     let mut found_lines = HashMap::new();
 
-    let regexes = if !opts.skip_build {
+    let regexes = if !opts.skip_regex_build {
         let files = fetch_git::fetch(
-            "https://github.com/paritytech/polkadot-sdk/".into(),
-            "master".into(),
+            opts.regex_repo.ok_or("Missing regex repo")?,
+            opts.regex_branch.ok_or("Missing regex branch")?,
         )
         .await?;
 
