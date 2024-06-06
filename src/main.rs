@@ -214,7 +214,7 @@ async fn run_warn_err(opts: Config) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     println!(
-        "\nUnknown lines [num {}]: {:?}",
+        "\nUnknown lines [num {}]: {:#?}",
         unknown_lines.len(),
         unknown_lines
     );
