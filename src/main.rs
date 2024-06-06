@@ -69,6 +69,13 @@ struct Config {
     #[clap(long)]
     end_time: Option<String>,
 
+    /// Optionally provide an organization ID.
+    #[clap(long)]
+    org_id: Option<String>,
+
+    #[clap(long)]
+    skip_build: bool,
+
     /// Provide the raw lines from the query.
     #[clap(long)]
     raw: bool,
@@ -116,15 +123,24 @@ fn process_lines<'a>(
     log::info!(" Processing line took {:?}", now.elapsed());
 }
 
-fn run_warn_err(
-    opts: Config,
-    regexes: &[(Regex, RegexDetails)],
-) -> Result<(), Box<dyn std::error::Error>> {
+async fn run_warn_err(opts: Config) -> Result<(), Box<dyn std::error::Error>> {
     log::info!("Running WarnErr query");
     let mut stats = Stats::new();
 
     let mut unknown_lines = Vec::with_capacity(1024);
     let mut found_lines = HashMap::new();
+
+    let regexes = if !opts.skip_build {
+        let files = fetch_git::fetch(
+            "https://github.com/paritytech/polkadot-sdk/".into(),
+            "master".into(),
+        )
+        .await?;
+
+        fetch_git::build_regexes(files)
+    } else {
+        vec![]
+    };
 
     if let Some(file) = &opts.file {
         let bytes = std::fs::read(file)?;
@@ -138,7 +154,7 @@ fn run_warn_err(
             lines,
             &mut stats,
             &mut unknown_lines,
-            regexes,
+            &regexes,
             &mut found_lines,
         );
     } else {
@@ -148,6 +164,7 @@ fn run_warn_err(
             .chain(opts.chain)
             .levels(vec!["WARN".to_string(), "ERROR".to_string()])
             .set_time(opts.start_time, opts.end_time)
+            .org_id(opts.org_id)
             .build_chunks();
 
         // Run the queries.
@@ -159,7 +176,7 @@ fn run_warn_err(
                 result.lines(),
                 &mut stats,
                 &mut unknown_lines,
-                regexes,
+                &regexes,
                 &mut found_lines,
             );
         }
@@ -260,16 +277,9 @@ fn run_panics(opts: Config) -> Result<(), Box<dyn std::error::Error>> {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
 
-    let files = fetch_git::fetch(
-        "https://github.com/paritytech/polkadot-sdk/".into(),
-        "master".into(),
-    )
-    .await?;
-    let matches = fetch_git::build_regexes(files);
-
     let args = Command::parse();
     match args {
-        Command::WarnErr(opts) => run_warn_err(opts, &matches),
+        Command::WarnErr(opts) => run_warn_err(opts).await,
         Command::Panics(opts) => run_panics(opts),
     }
 }
