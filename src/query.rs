@@ -183,7 +183,7 @@ impl QueryBuilder {
         let node = self
             .node
             .as_ref()
-            .map(|node| format!(r#", node="{node}" "#))
+            .map(|node| format!(r#", node=~"{node}" "#))
             .unwrap_or_default();
 
         let batch = self.batch;
@@ -267,7 +267,7 @@ impl QueryBuilder {
         let node = self
             .node
             .as_ref()
-            .map(|node| format!(r#", node="{node}" "#))
+            .map(|node| format!(r#", node=~"{node}" "#))
             .unwrap_or_default();
 
         let build_query = |start_time_str: &str, end_time_str: &str| {
