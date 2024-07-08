@@ -99,7 +99,7 @@ fn process_lines<'a>(
     stats: &mut Stats,
     unknown_lines: &mut Vec<String>,
     regexes: &[(Regex, RegexDetails)],
-    found_lines: &mut HashMap<String, Vec<String>>,
+    found_lines: &mut HashMap<(String, RegexDetails), Vec<String>>,
 ) {
     let now = std::time::Instant::now();
 
@@ -115,10 +115,10 @@ fn process_lines<'a>(
 
         let mut found = false;
 
-        for (reg, _) in regexes {
+        for (reg, reg_details) in regexes {
             if reg.is_match(line) {
                 found_lines
-                    .entry(reg.to_string())
+                    .entry((reg.to_string(), reg_details.clone()))
                     .or_default()
                     .push(line.to_string());
 
@@ -202,14 +202,17 @@ async fn run_warn_err(opts: Config) -> Result<(), Box<dyn std::error::Error>> {
 
     println!();
     println!();
-    println!("{0: <10} | {1:<135}", "Count", "Triage report");
+    println!(
+        "{0: <10} | {1: <10} | {2:<135}",
+        "Count", "Level", "Triage report"
+    );
 
-    for (key, value) in found_lines.iter() {
+    for ((key, details), value) in found_lines.iter() {
         if value.is_empty() {
             continue;
         }
 
-        println!("{0: <10} | {1:<135}", value.len(), key);
+        println!("{0:<10} | {1:<10} | {2:<135}", value.len(), details.ty, key);
         stats.warning_err += value.len();
     }
 
@@ -220,12 +223,12 @@ async fn run_warn_err(opts: Config) -> Result<(), Box<dyn std::error::Error>> {
     );
 
     if opts.raw {
-        for (key, value) in found_lines.iter() {
+        for ((key, details), value) in found_lines.iter() {
             if value.is_empty() {
                 continue;
             }
 
-            println!("{0: <10} | {1:<135}", value.len(), key);
+            println!("{0:<10} | {1:<10} | {2:<135}", value.len(), details.ty, key);
             for line in value {
                 println!("  - {}", line);
             }

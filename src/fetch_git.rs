@@ -38,7 +38,7 @@ pub async fn fetch(
     Ok(data)
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct RegexDetails {
     pub file: String,
     pub start: usize,
