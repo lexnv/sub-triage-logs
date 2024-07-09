@@ -185,10 +185,18 @@ impl WarnErr {
         let regexes = Self::build_regexes(opts).await?;
 
         // Hardcoded currently for peerset.
-        let dedup_info = vec![DeduplicationInfo {
-            log_line: "banned, disconnecting, reason:".to_string(),
-            dedup_after: "banned, disconnecting, reason:".to_string(),
-        }];
+        let dedup_info = vec![
+            // Litep2p peerset.
+            DeduplicationInfo {
+                log_line: "banned, disconnecting, reason:".to_string(),
+                dedup_after: "banned, disconnecting, reason:".to_string(),
+            },
+            // Libp2p peerset (old backend)
+            DeduplicationInfo {
+                log_line: "Banned, disconnecting.".to_string(),
+                dedup_after: "Reason:".to_string(),
+            },
+        ];
 
         Ok(WarnErr {
             stats: Stats::new(),
