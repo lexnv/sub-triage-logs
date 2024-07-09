@@ -94,12 +94,30 @@ struct Config {
     raw: bool,
 }
 
+struct DeduplicationInfo {
+    log_line: String,
+    dedup_after: String,
+}
+
+fn find_deduplication_key(line: &str, dedup_info: &[DeduplicationInfo]) -> Option<String> {
+    for dedup in dedup_info {
+        if line.contains(&dedup.log_line) {
+            let substr = line.split_once(&dedup.dedup_after);
+            if let Some((_, rest)) = substr {
+                return Some(rest.to_string());
+            }
+        }
+    }
+    None
+}
+
 fn process_lines<'a>(
     lines: impl Iterator<Item = &'a str>,
     stats: &mut Stats,
     unknown_lines: &mut Vec<String>,
     regexes: &[(Regex, RegexDetails)],
     found_lines: &mut HashMap<(String, RegexDetails), Vec<String>>,
+    dedup_info: &[DeduplicationInfo],
 ) {
     let now = std::time::Instant::now();
 
@@ -117,8 +135,16 @@ fn process_lines<'a>(
 
         for (reg, reg_details) in regexes {
             if reg.is_match(line) {
+                let dedup_key = find_deduplication_key(line, dedup_info);
+
+                let entry_key = if let Some(dedup_key) = dedup_key {
+                    format!("{} {}", reg.to_string(), dedup_key)
+                } else {
+                    reg.to_string()
+                };
+
                 found_lines
-                    .entry((reg.to_string(), reg_details.clone()))
+                    .entry((entry_key, reg_details.clone()))
                     .or_default()
                     .push(line.to_string());
 
@@ -142,6 +168,11 @@ async fn run_warn_err(opts: Config) -> Result<(), Box<dyn std::error::Error>> {
 
     let mut unknown_lines = Vec::with_capacity(1024);
     let mut found_lines = HashMap::new();
+
+    let dedup_info = vec![DeduplicationInfo {
+        log_line: "banned, disconnecting, reason:".to_string(),
+        dedup_after: "banned, disconnecting, reason:".to_string(),
+    }];
 
     let regexes = if !opts.skip_regex_build {
         let files = fetch_git::fetch(
@@ -169,6 +200,7 @@ async fn run_warn_err(opts: Config) -> Result<(), Box<dyn std::error::Error>> {
             &mut unknown_lines,
             &regexes,
             &mut found_lines,
+            &dedup_info,
         );
     } else {
         // Build the query.
@@ -192,6 +224,7 @@ async fn run_warn_err(opts: Config) -> Result<(), Box<dyn std::error::Error>> {
                 &mut unknown_lines,
                 &regexes,
                 &mut found_lines,
+                &dedup_info,
             );
         }
     }
