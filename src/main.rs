@@ -45,7 +45,7 @@ enum Command {
     Panics(Config),
 }
 
-#[derive(Debug, ClapParser)]
+#[derive(Debug, ClapParser, Clone)]
 struct Config {
     /// The address of the Loki instance.
     #[clap(long, default_value = "http://loki.parity-versi.parity.io")]
@@ -111,165 +111,209 @@ fn find_deduplication_key(line: &str, dedup_info: &[DeduplicationInfo]) -> Optio
     None
 }
 
-fn process_lines<'a>(
-    lines: impl Iterator<Item = &'a str>,
-    stats: &mut Stats,
-    unknown_lines: &mut Vec<String>,
-    regexes: &[(Regex, RegexDetails)],
-    found_lines: &mut HashMap<(String, RegexDetails), Vec<String>>,
-    dedup_info: &[DeduplicationInfo],
-) {
-    let now = std::time::Instant::now();
+enum QueryType {
+    /// The triage is running for a provided file.
+    File(String),
+    /// The triage is running for a query against grafana.
+    Grafana(Vec<String>),
+}
 
-    for line in lines {
-        log::debug!("{}", line);
+struct WarnErr {
+    /// Statistics about processing lines.
+    stats: Stats,
 
-        stats.total += 1;
+    /// The unknown lines.
+    unknown_lines: Vec<String>,
+    /// The found lines from the regex.
+    found_lines: HashMap<(String, RegexDetails), Vec<String>>,
 
-        if line.is_empty() {
-            stats.empty_lines += 1;
-            continue;
-        }
+    /// The deduplication information.
+    ///
+    /// This is used to provide a better triage report, grouping by specific error
+    /// that cannot be extracted by the regex.
+    dedup_info: Vec<DeduplicationInfo>,
 
-        let mut found = false;
+    /// The regexes to match against, downloaded and compiled from the git repository.
+    regexes: Vec<(Regex, RegexDetails)>,
 
-        for (reg, reg_details) in regexes {
-            if reg.is_match(line) {
-                let dedup_key = find_deduplication_key(line, dedup_info);
+    /// The query type.
+    query_type: QueryType,
 
-                let entry_key = if let Some(dedup_key) = dedup_key {
-                    format!("{} {}", reg.to_string(), dedup_key)
-                } else {
-                    reg.to_string()
-                };
+    /// Provide the raw lines from the query.
+    raw: bool,
+}
 
-                found_lines
-                    .entry((entry_key, reg_details.clone()))
-                    .or_default()
-                    .push(line.to_string());
+impl WarnErr {
+    fn build_query(opts: Config) -> QueryType {
+        if let Some(file) = opts.file {
+            QueryType::File(file)
+        } else {
+            let queries = query::QueryBuilder::new()
+                .address(opts.address)
+                .chain(opts.chain)
+                .levels(vec!["WARN".to_string(), "ERROR".to_string()])
+                .set_time(opts.start_time, opts.end_time)
+                .org_id(opts.org_id)
+                .node(opts.node)
+                .build_chunks();
 
-                found = true;
-                break;
-            }
-        }
-
-        if !found {
-            stats.unknown += 1;
-            unknown_lines.push(line.to_string());
+            QueryType::Grafana(queries)
         }
     }
 
-    log::info!(" Processing line took {:?}", now.elapsed());
-}
+    async fn build_regexes(
+        opts: Config,
+    ) -> Result<Vec<(Regex, RegexDetails)>, Box<dyn std::error::Error>> {
+        if opts.skip_regex_build {
+            return Ok(vec![]);
+        }
 
-async fn run_warn_err(opts: Config) -> Result<(), Box<dyn std::error::Error>> {
-    log::info!("Running WarnErr query");
-    let mut stats = Stats::new();
-
-    let mut unknown_lines = Vec::with_capacity(1024);
-    let mut found_lines = HashMap::new();
-
-    let dedup_info = vec![DeduplicationInfo {
-        log_line: "banned, disconnecting, reason:".to_string(),
-        dedup_after: "banned, disconnecting, reason:".to_string(),
-    }];
-
-    let regexes = if !opts.skip_regex_build {
         let files = fetch_git::fetch(
             opts.regex_repo.ok_or("Missing regex repo")?,
             opts.regex_branch.ok_or("Missing regex branch")?,
         )
         .await?;
 
-        fetch_git::build_regexes(files)
-    } else {
-        vec![]
-    };
+        Ok(fetch_git::build_regexes(files))
+    }
 
-    if let Some(file) = &opts.file {
-        let bytes = std::fs::read(file)?;
-        let result = String::from_utf8_lossy(&bytes);
+    async fn new(opts: Config) -> Result<WarnErr, Box<dyn std::error::Error>> {
+        log::info!("Running WarnErr query");
 
-        let lines = result
-            .lines()
-            .filter(|x| x.contains("WARN") || x.contains("ERROR"));
+        let raw = opts.raw;
+        let query_type = Self::build_query(opts.clone());
+        let regexes = Self::build_regexes(opts).await?;
 
-        process_lines(
-            lines,
-            &mut stats,
-            &mut unknown_lines,
-            &regexes,
-            &mut found_lines,
-            &dedup_info,
+        // Hardcoded currently for peerset.
+        let dedup_info = vec![DeduplicationInfo {
+            log_line: "banned, disconnecting, reason:".to_string(),
+            dedup_after: "banned, disconnecting, reason:".to_string(),
+        }];
+
+        Ok(WarnErr {
+            stats: Stats::new(),
+            unknown_lines: Vec::with_capacity(1024),
+            found_lines: HashMap::with_capacity(1024),
+            dedup_info,
+            regexes,
+            query_type,
+            raw,
+        })
+    }
+
+    async fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        match &self.query_type {
+            QueryType::File(file) => {
+                let bytes = std::fs::read(file)?;
+                let result = String::from_utf8_lossy(&bytes);
+
+                let lines = result
+                    .lines()
+                    .filter(|x| x.contains("WARN") || x.contains("ERROR"));
+
+                self.process_lines(lines);
+            }
+            QueryType::Grafana(queries) => {
+                // Run the queries.
+                for query in queries.clone() {
+                    let bytes = query::QueryRunner::run(&query)?;
+                    let result = String::from_utf8_lossy(&bytes);
+
+                    self.process_lines(result.lines());
+                }
+            }
+        }
+
+        self.process_results();
+
+        Ok(())
+    }
+
+    fn process_lines<'a>(&mut self, lines: impl Iterator<Item = &'a str>) {
+        let now = std::time::Instant::now();
+
+        for line in lines {
+            log::debug!("{}", line);
+
+            self.stats.total += 1;
+
+            if line.is_empty() {
+                self.stats.empty_lines += 1;
+                continue;
+            }
+
+            let mut found = false;
+
+            for (reg, reg_details) in &self.regexes {
+                if reg.is_match(line) {
+                    let dedup_key = find_deduplication_key(line, &self.dedup_info);
+
+                    let entry_key = if let Some(dedup_key) = dedup_key {
+                        format!("{} {}", reg.to_string(), dedup_key)
+                    } else {
+                        reg.to_string()
+                    };
+
+                    self.found_lines
+                        .entry((entry_key, reg_details.clone()))
+                        .or_default()
+                        .push(line.to_string());
+
+                    found = true;
+                    break;
+                }
+            }
+
+            if !found {
+                self.stats.unknown += 1;
+                self.unknown_lines.push(line.to_string());
+            }
+        }
+
+        log::info!(" Processing line took {:?}", now.elapsed());
+    }
+
+    fn process_results(&mut self) {
+        // Sort the found lines by occurrence.
+        let mut found_lines: Vec<_> = self.found_lines.clone().into_iter().collect();
+        found_lines.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
+
+        println!();
+        println!();
+        println!(
+            "{0: <10} | {1: <10} | {2:<135}",
+            "Count", "Level", "Triage report"
         );
-    } else {
-        // Build the query.
-        let queries = query::QueryBuilder::new()
-            .address(opts.address)
-            .chain(opts.chain)
-            .levels(vec!["WARN".to_string(), "ERROR".to_string()])
-            .set_time(opts.start_time, opts.end_time)
-            .org_id(opts.org_id)
-            .node(opts.node)
-            .build_chunks();
 
-        // Run the queries.
-        for query in queries {
-            let bytes = query::QueryRunner::run(&query)?;
-            let result = String::from_utf8_lossy(&bytes);
-
-            process_lines(
-                result.lines(),
-                &mut stats,
-                &mut unknown_lines,
-                &regexes,
-                &mut found_lines,
-                &dedup_info,
-            );
-        }
-    }
-
-    // Sort the found lines by occurrence.
-    let mut found_lines: Vec<_> = found_lines.into_iter().collect();
-    found_lines.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
-
-    println!();
-    println!();
-    println!(
-        "{0: <10} | {1: <10} | {2:<135}",
-        "Count", "Level", "Triage report"
-    );
-
-    for ((key, details), value) in found_lines.iter() {
-        if value.is_empty() {
-            continue;
-        }
-
-        println!("{0:<10} | {1:<10} | {2:<135}", value.len(), details.ty, key);
-        stats.warning_err += value.len();
-    }
-
-    println!(
-        "\nUnknown lines [num {}]: {:#?}",
-        unknown_lines.len(),
-        unknown_lines
-    );
-
-    if opts.raw {
         for ((key, details), value) in found_lines.iter() {
             if value.is_empty() {
                 continue;
             }
 
             println!("{0:<10} | {1:<10} | {2:<135}", value.len(), details.ty, key);
-            for line in value {
-                println!("  - {}", line);
+            self.stats.warning_err += value.len();
+        }
+
+        println!(
+            "\nUnknown lines [num {}]: {:#?}",
+            self.unknown_lines.len(),
+            self.unknown_lines
+        );
+
+        if self.raw {
+            for ((key, details), value) in found_lines.iter() {
+                if value.is_empty() {
+                    continue;
+                }
+
+                println!("{0:<10} | {1:<10} | {2:<135}", value.len(), details.ty, key);
+                for line in value {
+                    println!("  - {}", line);
+                }
+                println!();
             }
-            println!();
         }
     }
-
-    Ok(())
 }
 
 fn run_panics(opts: Config) -> Result<(), Box<dyn std::error::Error>> {
@@ -329,7 +373,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let args = Command::parse();
     match args {
-        Command::WarnErr(opts) => run_warn_err(opts).await,
+        Command::WarnErr(opts) => WarnErr::new(opts).await?.run().await,
         Command::Panics(opts) => run_panics(opts),
     }
 }
