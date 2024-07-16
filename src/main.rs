@@ -99,18 +99,6 @@ struct DeduplicationInfo {
     dedup_after: String,
 }
 
-fn find_deduplication_key(line: &str, dedup_info: &[DeduplicationInfo]) -> Option<String> {
-    for dedup in dedup_info {
-        if line.contains(&dedup.log_line) {
-            let substr = line.split_once(&dedup.dedup_after);
-            if let Some((_, rest)) = substr {
-                return Some(rest.to_string());
-            }
-        }
-    }
-    None
-}
-
 enum QueryType {
     /// The triage is running for a provided file.
     File(String),
@@ -196,6 +184,11 @@ impl WarnErr {
                 log_line: "Banned, disconnecting.".to_string(),
                 dedup_after: "Reason:".to_string(),
             },
+            // Error importing block deduplication.
+            DeduplicationInfo {
+                log_line: "Error importing block".to_string(),
+                dedup_after: ":".to_string(),
+            },
         ];
 
         Ok(WarnErr {
@@ -237,6 +230,20 @@ impl WarnErr {
         Ok(())
     }
 
+    fn find_deduplication_key(&self, line: &str) -> Option<String> {
+        for dedup in &self.dedup_info {
+            if !line.contains(&dedup.log_line) {
+                continue;
+            }
+
+            let substr = line.rsplit_once(&dedup.dedup_after);
+            if let Some((_, rest)) = substr {
+                return Some(rest.to_string());
+            }
+        }
+        None
+    }
+
     fn process_lines<'a>(&mut self, lines: impl Iterator<Item = &'a str>) {
         let now = std::time::Instant::now();
 
@@ -254,10 +261,10 @@ impl WarnErr {
 
             for (reg, reg_details) in &self.regexes {
                 if reg.is_match(line) {
-                    let dedup_key = find_deduplication_key(line, &self.dedup_info);
+                    let dedup_key = self.find_deduplication_key(line);
 
                     let entry_key = if let Some(dedup_key) = dedup_key {
-                        format!("{} {}", reg.to_string(), dedup_key)
+                        format!("{} ({})", reg.to_string(), dedup_key)
                     } else {
                         reg.to_string()
                     };
