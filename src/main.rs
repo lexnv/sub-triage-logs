@@ -6,6 +6,7 @@ use regex::Regex;
 
 pub mod fetch_git;
 pub mod query;
+pub mod warp_time;
 
 #[derive(Debug)]
 struct Stats {
@@ -43,6 +44,7 @@ impl Drop for Stats {
 enum Command {
     WarnErr(Config),
     Panics(Config),
+    WarpTime(warp_time::Config),
 }
 
 #[derive(Debug, ClapParser, Clone)]
@@ -390,5 +392,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     match args {
         Command::WarnErr(opts) => WarnErr::new(opts).await?.run().await,
         Command::Panics(opts) => run_panics(opts),
+        Command::WarpTime(config) => warp_time::WarpTime::run(config),
     }
 }
