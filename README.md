@@ -1,6 +1,15 @@
-## Sub Triage Logs
+# Sub Triage Logs
 
 Small experimental tool to triage Substrate-based testing stacks and group logs by common patterns.
+
+## Setup
+
+Run the following commands to gain access to the testing stack logs (auth required):
+
+```bash
+tsh login --proxy=teleport.parity.io:443
+tsh proxy app versi-loki --port 10700
+```
 
 ## Usage
 
@@ -33,6 +42,6 @@ Example output:
 
 Phase | Time
  -|-
-Warp  | 521.999999816s
+Warp | 521.999999816s
 State | 83.000000298s
 Total | 605.000000114s
