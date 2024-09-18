@@ -143,8 +143,8 @@ impl QueryBuilder {
                 // Compute endtime as now.
                 let date_time = chrono::Utc::now();
                 let end_time = format!("{}", date_time.format("%Y-%m-%dT%H:%M:%SZ"));
-                // Subtract 1 hour from date time
-                let date_time = date_time - chrono::Duration::hours(1);
+                // Subtract 24 hour from date time
+                let date_time = date_time - chrono::Duration::hours(24);
                 let start_time = format!("{}", date_time.format("%Y-%m-%dT%H:%M:%SZ"));
 
                 log::debug!("Generating time {} {}", start_time, end_time);
