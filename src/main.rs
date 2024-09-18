@@ -50,7 +50,7 @@ enum Command {
 #[derive(Debug, ClapParser, Clone)]
 struct Config {
     /// The address of the Loki instance.
-    #[clap(long, default_value = "http://loki.parity-versi.parity.io")]
+    #[clap(long, default_value = "127.0.0.1:10700")]
     address: String,
 
     /// Optionally provide a file for parsing instead of querying the Loki instance.

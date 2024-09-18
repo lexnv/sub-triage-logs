@@ -1,7 +1,7 @@
 //! Query builder and running for fetching the grafana logs.
 
 /// Default URL of the Loki instance.
-const DEFAULT_URL: &str = "http://loki.parity-versi.parity.io";
+const DEFAULT_URL: &str = "127.0.0.1:10700";
 /// Default chain to query.
 const DEFAULT_CHAIN: &str = "versi-networking";
 /// Exclude common errors from the query.
@@ -190,7 +190,7 @@ impl QueryBuilder {
         let limit = self.limit;
 
         format!(
-            r#"docker run grafana/logcli:main-926a0b2-amd64 query --addr={addr} --timezone=UTC --from="{start_time}" --to="{end_time}" '{{chain="{chain}" {levels} {node}}} {exclude_common_errors}' --batch {batch} --limit {limit} {org_id}"#,
+            r#"logcli query --addr={addr} --timezone=UTC --from="{start_time}" --to="{end_time}" '{{chain="{chain}" {levels} {node}}} {exclude_common_errors}' --batch {batch} --limit {limit} {org_id}"#,
         )
     }
 
@@ -272,7 +272,7 @@ impl QueryBuilder {
 
         let build_query = |start_time_str: &str, end_time_str: &str| {
             format!(
-                r#"docker run grafana/logcli:main-926a0b2-amd64 query --addr={addr} --timezone=UTC --from="{start_time_str}" --to="{end_time_str}" '{{chain="{chain}" {levels} {node}}} {exclude_common_errors} {appended_query}' --batch {batch} --limit {limit} {org_id}"#,
+                r#"logcli query --addr={addr} --timezone=UTC --from="{start_time_str}" --to="{end_time_str}" '{{chain="{chain}" {levels} {node}}} {exclude_common_errors} {appended_query}' --batch {batch} --limit {limit} {org_id}"#,
             )
         };
 
