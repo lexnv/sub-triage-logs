@@ -40,6 +40,7 @@ pub async fn fetch(
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct RegexDetails {
+    pub repo: String,
     pub file: String,
     pub start: usize,
     pub end: usize,
@@ -103,7 +104,10 @@ fn extract_log_line<'a>(mut line: &'a str) -> Option<&'a str> {
     )
 }
 
-pub fn build_regexes(data: Vec<(String, String)>) -> Vec<(regex::Regex, RegexDetails)> {
+pub fn build_regexes(
+    data: Vec<(String, String)>,
+    repo: String,
+) -> Vec<(regex::Regex, RegexDetails)> {
     let mut regexes = Vec::new();
 
     let mut encountered_logs = 0;
@@ -201,6 +205,7 @@ pub fn build_regexes(data: Vec<(String, String)>) -> Vec<(regex::Regex, RegexDet
                 regexes.push((
                     regex,
                     RegexDetails {
+                        repo: repo.clone(),
                         file: file_path.clone(),
                         start,
                         end,

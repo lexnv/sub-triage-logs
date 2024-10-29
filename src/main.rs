@@ -164,7 +164,18 @@ impl WarnErr {
         )
         .await?;
 
-        Ok(fetch_git::build_regexes(files))
+        let mut regexes = fetch_git::build_regexes(files, "polkadot-sdk".into());
+
+        let litep2p_files = fetch_git::fetch(
+            "https://github.com/paritytech/litep2p/".into(),
+            "master".into(),
+        )
+        .await?;
+
+        let litep2p_regexes = fetch_git::build_regexes(litep2p_files, "litep2p".into());
+        regexes.extend(litep2p_regexes.into_iter());
+
+        Ok(regexes)
     }
 
     async fn new(opts: Config) -> Result<WarnErr, Box<dyn std::error::Error>> {
