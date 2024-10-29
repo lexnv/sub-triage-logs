@@ -366,6 +366,8 @@ fn run_panics(opts: Config) -> Result<(), Box<dyn std::error::Error>> {
         // Panics can appear anywhere.
         .exclude_common_errors(false)
         .append_query("|~ `panic`".to_string())
+        .org_id(opts.org_id)
+        .node(opts.node)
         .build_chunks();
 
     for query in queries {
