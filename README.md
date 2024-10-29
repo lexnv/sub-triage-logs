@@ -11,6 +11,13 @@ tsh login --proxy=teleport.parity.io:443
 tsh proxy app versi-loki --port 10700
 ```
 
+For production chains use:
+
+```bash
+tsh login --proxy=teleport.parity.io:443
+tsh proxy app loki --port 10700
+```
+
 ## Usage
 
 ### warn-err
