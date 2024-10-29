@@ -309,8 +309,8 @@ impl WarnErr {
         println!();
         println!();
         println!(
-            "{0: <10} | {1: <10} | {2:<135}",
-            "Count", "Level", "Triage report"
+            "{0: <15} | {1: <10} | {2: <10} | {3:<135}",
+            "Repo", "Count", "Level", "Triage report"
         );
 
         for ((key, details), value) in found_lines.iter() {
@@ -318,7 +318,13 @@ impl WarnErr {
                 continue;
             }
 
-            println!("{0:<10} | {1:<10} | {2:<135}", value.len(), details.ty, key);
+            println!(
+                "{0: <15} | {1:<10} | {2:<10} | {3:<135}",
+                details.repo,
+                value.len(),
+                details.ty,
+                key
+            );
             self.stats.warning_err += value.len();
         }
 
