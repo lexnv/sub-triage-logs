@@ -12,6 +12,7 @@ pub struct QueryBuilder {
     chain: Option<String>,
     start_time: Option<String>,
     end_time: Option<String>,
+    last_day: bool,
     levels: Vec<String>,
     batch: usize,
     limit: usize,
@@ -35,6 +36,7 @@ impl QueryBuilder {
             chain: None,
             start_time: None,
             end_time: None,
+            last_day: false,
             levels: Vec::new(),
             batch: 5000,
             limit: 100000,
@@ -66,9 +68,15 @@ impl QueryBuilder {
     /// The format is "YYYY-MM-DDTHH:MM:SSZ".
     ///
     /// Default: 1 hour before the current time.
-    pub fn set_time(mut self, start_time: Option<String>, end_time: Option<String>) -> Self {
+    pub fn set_time(
+        mut self,
+        start_time: Option<String>,
+        end_time: Option<String>,
+        last_day: bool,
+    ) -> Self {
         self.start_time = start_time;
         self.end_time = end_time;
+        self.last_day = last_day;
         self
     }
 
@@ -138,8 +146,8 @@ impl QueryBuilder {
             .then_some(EXCLUDE_KNOWN_ERRORS)
             .unwrap_or_default();
 
-        let (start_time, end_time) = match (&self.start_time, &self.end_time) {
-            (None, None) => {
+        let (start_time, end_time) = match (&self.start_time, &self.end_time, self.last_day) {
+            (None, None, true) => {
                 // Compute endtime as now.
                 let date_time = chrono::Utc::now();
                 let end_time = format!("{}", date_time.format("%Y-%m-%dT%H:%M:%SZ"));
@@ -150,7 +158,18 @@ impl QueryBuilder {
                 log::debug!("Generating time {} {}", start_time, end_time);
                 (start_time, end_time)
             }
-            (Some(start_time), Some(end_time)) => {
+            (None, None, false) => {
+                // Compute endtime as now.
+                let date_time = chrono::Utc::now();
+                let end_time = format!("{}", date_time.format("%Y-%m-%dT%H:%M:%SZ"));
+                // Subtract 1 hour from date time
+                let date_time = date_time - chrono::Duration::hours(1);
+                let start_time = format!("{}", date_time.format("%Y-%m-%dT%H:%M:%SZ"));
+
+                log::debug!("Generating time {} {}", start_time, end_time);
+                (start_time, end_time)
+            }
+            (Some(start_time), Some(end_time), false) => {
                 log::debug!("Using provided time {start_time} {end_time}");
                 (start_time.clone(), end_time.clone())
             }
@@ -201,8 +220,19 @@ impl QueryBuilder {
             .then_some(EXCLUDE_KNOWN_ERRORS)
             .unwrap_or_default();
 
-        let (start_time, end_time) = match (&self.start_time, &self.end_time) {
-            (None, None) => {
+        let (start_time, end_time) = match (&self.start_time, &self.end_time, self.last_day) {
+            (None, None, true) => {
+                // Compute endtime as now.
+                let date_time = chrono::Utc::now();
+                let end_time = format!("{}", date_time.format("%Y-%m-%dT%H:%M:%SZ"));
+                // Subtract 24 hour from date time
+                let date_time = date_time - chrono::Duration::hours(24);
+                let start_time = format!("{}", date_time.format("%Y-%m-%dT%H:%M:%SZ"));
+
+                log::debug!("Generating time {} {}", start_time, end_time);
+                (start_time, end_time)
+            }
+            (None, None, false) => {
                 // Compute endtime as now.
                 let date_time = chrono::Utc::now();
                 let end_time = format!("{}", date_time.format("%Y-%m-%dT%H:%M:%SZ"));
@@ -213,7 +243,7 @@ impl QueryBuilder {
                 log::debug!("Generating time {} {}", start_time, end_time);
                 (start_time, end_time)
             }
-            (Some(start_time), Some(end_time)) => {
+            (Some(start_time), Some(end_time), false) => {
                 log::debug!("Using provided time {start_time} {end_time}");
                 (start_time.clone(), end_time.clone())
             }

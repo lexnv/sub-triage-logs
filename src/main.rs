@@ -65,6 +65,10 @@ struct Config {
     #[clap(long)]
     node: Option<String>,
 
+    /// Provide the info for the last 24 hours.
+    #[clap(long)]
+    last_day: bool,
+
     /// The start time of the query.
     /// The format is "YYYY-MM-DDTHH:MM:SSZ".
     #[clap(long)]
@@ -142,7 +146,7 @@ impl WarnErr {
                 .address(opts.address)
                 .chain(opts.chain)
                 .levels(vec!["WARN".to_string(), "ERROR".to_string()])
-                .set_time(opts.start_time, opts.end_time)
+                .set_time(opts.start_time, opts.end_time, opts.last_day)
                 .org_id(opts.org_id)
                 .node(opts.node)
                 .build_chunks();
@@ -358,7 +362,7 @@ fn run_panics(opts: Config) -> Result<(), Box<dyn std::error::Error>> {
     let queries = query::QueryBuilder::new()
         .address(opts.address)
         .chain(opts.chain)
-        .set_time(opts.start_time, opts.end_time)
+        .set_time(opts.start_time, opts.end_time, opts.last_day)
         // Panics can appear anywhere.
         .exclude_common_errors(false)
         .append_query("|~ `panic`".to_string())
